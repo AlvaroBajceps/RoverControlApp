@@ -12,26 +12,60 @@ on:
         default: 'v1.0.0'
 
 env:
-  GODOT_VERSION: 4.3
   PROJECT_PATH: .
+  URL_GODOT: https://github.com/godotengine/godot-builds/releases/download/4.3-stable/Godot_v4.3-stable_mono_linux_x86_64.zip
+  URL_GODOT_EXPORT_TEMPLATES: https://github.com/godotengine/godot-builds/releases/download/4.3-stable/Godot_v4.3-stable_mono_export_templates.tpz
 
 jobs:
-  export-windows:
-    name: Windows Export
-    runs-on: ubuntu-22.04  # Use 22.04 with godot 4
-    container:
-      image: barichello/godot-ci:mono-4.3
+  export-all:
+    name: Godot Export (All)
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           lfs: true
-      - name: Setup
+      - name: Setup Godot & Dotnet 8.0
         run: |
-          mkdir -v -p ~/.local/share/godot/export_templates/
-          mkdir -v -p ~/.config/
-          mv /root/.config/godot ~/.config/godot
-          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable.mono ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable.mono
+          echo
+          echo ## Prepare ##
+          echo
+          apt install -y unzip curl libicu74
+          pushd ~
+          mkdir -v -p ~/.local/bin
+          mkdir -v ~/godot
+          echo
+          echo ## Setup Godot - dotnet ##
+          echo
+          pushd ~/godot
+          curl -L --output dotnet-install.sh https://dot.net/v1/dotnet-install.sh
+          chmod +x dotnet-install.sh
+          mkdir -v dotnet
+          ./dotnet-install.sh --install-dir ~/godot/dotnet -c 8.0
+          ln -s ~/godot/dotnet/dotnet ~/.local/bin/dotnet
+          echo -e "\nexport PATH=$PATH:~/.local/bin\n" >> ~/.bashrc
+          popd
+          echo
+          echo ## Setup Godot - Editor ##
+          echo
+          pushd ~/godot
+          curl -L --output godot-editor.zip $URL_GODOT
+          unzip godot-editor.zip -d gde/
+          ln -s ~/godot/gde/*/*.x86_64 ~/.local/bin/godot
+          popd
+          echo
+          echo ## Setup Godot - Export Templates ##
+          echo
+          pushd ~/godot
+          curl -L --output export-templates.zip $URL_GODOT_EXPORT_TEMPLATES
+          unzip export-templates.zip -d gde-templates/
+          mkdir -v -p ~/.local/share/godot/export_templates
+          mv gde-templates/templates ~/.local/share/godot/export_templates/$(cat gde-templates/templates/version.txt)
+          popd
+          echo
+          echo ## End ##
+          echo
+          popd
       - name: Godot Editor Run
         run: |
           cd $PROJECT_PATH
@@ -39,51 +73,29 @@ jobs:
           godot --headless -e --quit
           git restore .
           godot --headless -e --quit
-      - name: Windows Build
+      - name: Godot Export - Windows
         run: |
-          mkdir -v -p build/release-win
           cd $PROJECT_PATH
+          mkdir -v -p build/release-win
           godot --headless --verbose --export-release "Windows Desktop"
-      - name: Upload Artifact
+      - name: Godot Export - Linux
+        run: |
+          cd $PROJECT_PATH
+          mkdir -v -p build/release-linux
+          godot --headless --verbose --export-release "Linux/X11"
+      - name: Upload Artifact - Windows
         uses: actions/upload-artifact@v4
         with:
           name: RCA-win
           path: build/release-win
-
-  export-linux:
-    name: Linux Export
-    runs-on: ubuntu-22.04  # Use 22.04 with godot 4
-    container:
-      image: barichello/godot-ci:mono-4.3
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          lfs: true
-      - name: Setup
-        run: |
-          mkdir -v -p ~/.local/share/godot/export_templates/
-          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable.mono ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable.mono
-      - name: Godot Editor Run
-        run: |
-          cd $PROJECT_PATH
-          dotnet build
-          godot --headless -e --quit
-          git restore .
-          godot --headless -e --quit
-      - name: Linux Build
-        run: |
-          mkdir -v -p build/release-linux
-          cd $PROJECT_PATH
-          godot --headless --verbose --export-release "Linux/X11"
-      - name: Upload Artifact
+      - name: Upload Artifact - Linux
         uses: actions/upload-artifact@v4
         with:
           name: RCA-linux
           path: build/release-linux
-
-  release:
-    needs: [ export-linux,export-windows ]
+          
+  draft-release:
+    needs: [ export-all ]
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
