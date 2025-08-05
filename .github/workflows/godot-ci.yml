@@ -30,7 +30,7 @@ jobs:
           echo
           echo ## Prepare ##
           echo
-          apt install -y unzip curl libicu74
+          sudo apt install -y unzip curl libicu74
           pushd ~
           mkdir -v -p ~/.local/bin
           mkdir -v ~/godot
